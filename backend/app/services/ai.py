@@ -1,5 +1,6 @@
 import json
 import re
+from datetime import timedelta
 
 from fastapi import HTTPException
 
@@ -81,16 +82,68 @@ Rules:
         response = model.generate_content(prompt)
         text = (response.text or "").strip()
     except Exception as exc:  # noqa: BLE001 - surface provider errors as HTTP 502
+        # Keep provider internals out of public API responses; details remain in
+        # hosting logs if a platform logger is configured.
         raise HTTPException(
             status_code=502,
-            detail=f"Gemini request failed: {exc}",
+            detail="Gemini could not generate an itinerary. Check the API key, model, quota, and try again.",
         ) from exc
 
     payload = _extract_json(text)
     try:
-        return Itinerary.model_validate(payload)
+        itinerary = Itinerary.model_validate(payload)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(
             status_code=502,
             detail="Gemini JSON did not match the itinerary schema.",
         ) from exc
+
+    # Treat the user's submitted trip dates and currency as authoritative. AI output
+    # is untrusted and must not silently change the requested trip.
+    expected_dates = [
+        (trip.start_date + timedelta(days=index)).isoformat()
+        for index in range(trip.days)
+    ]
+    if len(itinerary.days) != trip.days:
+        raise HTTPException(
+            status_code=502,
+            detail="Gemini returned the wrong number of itinerary days. Please try again.",
+        )
+
+    required_slots = {"morning", "afternoon", "evening"}
+    activity_total = 0.0
+    daily_total = 0.0
+    for index, day in enumerate(itinerary.days):
+        # Normalize numbering/date so timezone or formatting mistakes cannot shift
+        # the trip dates shown to the user.
+        day.day = index + 1
+        day.date = expected_dates[index]
+        slots = [activity.time_of_day for activity in day.activities]
+        if len(slots) != 3 or set(slots) != required_slots:
+            raise HTTPException(
+                status_code=502,
+                detail="Gemini returned an incomplete day. Please try generating again.",
+            )
+        if any(activity.estimated_cost < 0 for activity in day.activities):
+            raise HTTPException(
+                status_code=502,
+                detail="Gemini returned an invalid activity cost. Please try again.",
+            )
+        activity_total += sum(activity.estimated_cost for activity in day.activities)
+        daily_total += day.daily_budget
+
+    if itinerary.total_estimated_cost < 0 or activity_total > trip.budget * 1.05:
+        raise HTTPException(
+            status_code=502,
+            detail="Gemini returned costs above the requested budget. Please try again.",
+        )
+
+    itinerary.destination = trip.destination
+    itinerary.currency = trip.currency
+    # Prefer the sum of the day budgets when it is sensible; keep all displayed
+    # totals aligned with the user's budget ceiling.
+    if daily_total > 0 and daily_total <= trip.budget * 1.05:
+        itinerary.total_estimated_cost = round(min(daily_total, trip.budget), 2)
+    else:
+        itinerary.total_estimated_cost = round(min(activity_total, trip.budget), 2)
+    return itinerary

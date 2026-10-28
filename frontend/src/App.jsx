@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { fetchStatus, generateItinerary } from "./api";
+import { buildLocalDemo } from "./demo";
 
 const INTERESTS = [
   "food",
@@ -91,7 +92,7 @@ export default function App() {
         setStatusError("");
       })
       .catch(() => {
-        setStatusError("Backend is not reachable on VITE_API_URL. Start FastAPI first.");
+        setStatusError("Backend is offline. You can still try the planner in local demo mode; live AI and cloud saving need the backend.");
       });
   }, []);
 
@@ -130,7 +131,20 @@ export default function App() {
       const data = await generateItinerary(payload);
       setResult(data);
     } catch (error) {
-      setSubmitError(error.message || "Could not generate itinerary.");
+      if (
+        error.message?.includes("Cannot reach the API") ||
+        error.message?.includes("request timed out")
+      ) {
+        setResult(buildLocalDemo({
+          ...form,
+          destination: form.destination.trim(),
+          budget: Number(form.budget),
+          travelers: Number(form.travelers),
+        }));
+        setStatusError("Backend is offline. Showing a local demo plan; it has not been saved and does not use live AI.");
+      } else {
+        setSubmitError(error.message || "Could not generate itinerary.");
+      }
     } finally {
       setLoading(false);
     }
@@ -302,9 +316,24 @@ export default function App() {
               <h2>{itinerary.destination}</h2>
               <p>{itinerary.summary}</p>
               <p className="cost">
-                Estimated total: {itinerary.currency} {itinerary.total_estimated_cost}
+                Estimated total: {itinerary.currency} {Number(itinerary.total_estimated_cost).toLocaleString()}
                 {result.saved ? " · Saved to Supabase" : " · Not saved"}
               </p>
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => {
+                  const blob = new Blob([JSON.stringify(result, null, 2)], { type: "application/json" });
+                  const url = URL.createObjectURL(blob);
+                  const link = document.createElement("a");
+                  link.href = url;
+                  link.download = `${itinerary.destination.trim().replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-itinerary.json`;
+                  link.click();
+                  URL.revokeObjectURL(url);
+                }}
+              >
+                Download itinerary (JSON)
+              </button>
               <div className="days">
                 {itinerary.days.map((day) => (
                   <article key={`${day.day}-${day.date}`} className="day">

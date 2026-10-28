@@ -1,12 +1,17 @@
-from supabase import Client, create_client
-
 from app.config import Settings
 from app.schemas import Itinerary, TripRequest
 
 
-def get_client(settings: Settings) -> Client | None:
+def get_client(settings: Settings):
+    """Create the Supabase client only when credentials are configured."""
     if not settings.supabase_configured:
         return None
+    try:
+        from supabase import create_client
+    except ImportError as exc:
+        raise RuntimeError(
+            "Supabase is configured but the supabase package is not installed."
+        ) from exc
     return create_client(settings.supabase_url, settings.supabase_service_role_key)
 
 
@@ -32,7 +37,7 @@ def save_itinerary(
         "group_type": trip.group_type,
         "travelers": trip.travelers,
         "source": source,
-        "itinerary": itinerary.model_dump(),
+        "itinerary": itinerary.model_dump(mode="json"),
     }
     result = client.table("itineraries").insert(row).execute()
     if not result.data:

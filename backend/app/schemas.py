@@ -1,4 +1,4 @@
-from datetime import date, timedelta
+from datetime import date
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -24,7 +24,7 @@ class TripRequest(BaseModel):
     start_date: date
     end_date: date
     budget: float = Field(..., gt=0, le=10_000_000)
-    currency: str = Field(default="INR", min_length=3, max_length=3)
+    currency: str = Field(default="INR", min_length=3, max_length=3, pattern=r"^[A-Za-z]{3}$")
     interests: list[str] = Field(..., min_length=1, max_length=8)
     travel_style: TravelStyle
     pace: Pace = "moderate"
@@ -65,7 +65,7 @@ class TripRequest(BaseModel):
         nights = (self.end_date - self.start_date).days
         if nights > 13:
             raise ValueError("MVP supports trips of 14 days or fewer.")
-        if self.start_date < date.today() - timedelta(days=1):
+        if self.start_date < date.today():
             raise ValueError("Start date cannot be in the past.")
         return self
 
@@ -78,7 +78,7 @@ class Activity(BaseModel):
     time_of_day: Literal["morning", "afternoon", "evening"]
     title: str
     description: str
-    estimated_cost: float = 0
+    estimated_cost: float = Field(default=0, ge=0)
     location: str = ""
 
 
@@ -87,14 +87,14 @@ class DayPlan(BaseModel):
     date: str
     theme: str
     activities: list[Activity]
-    daily_budget: float = 0
+    daily_budget: float = Field(default=0, ge=0)
 
 
 class Itinerary(BaseModel):
     destination: str
     summary: str
     days: list[DayPlan]
-    total_estimated_cost: float
+    total_estimated_cost: float = Field(ge=0)
     currency: str
     tips: list[str] = Field(default_factory=list)
 

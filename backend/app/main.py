@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+import os
 
 from app.config import get_settings
 from app.schemas import GenerateResponse, ServiceStatus, TripRequest
@@ -9,9 +10,15 @@ from app.services.demo import build_demo_itinerary
 
 app = FastAPI(title="SkillWallet Travel Itinerary Planner", version="1.0.0")
 
+def _cors_origins() -> list[str]:
+    configured = os.getenv("CORS_ORIGINS", "")
+    defaults = ["http://localhost:5173", "http://127.0.0.1:5173"]
+    return [origin.strip().rstrip("/") for origin in configured.split(",") if origin.strip()] or defaults
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=_cors_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -56,8 +63,9 @@ def create_itinerary(trip: TripRequest) -> GenerateResponse:
             saved = bool(itinerary_id)
             if not saved:
                 notices.append("Supabase insert returned no row. Check the itineraries table.")
-        except Exception as exc:  # noqa: BLE001
-            notices.append(f"Itinerary was generated but not saved. Supabase error: {exc}")
+        except Exception:  # noqa: BLE001
+            # Avoid returning database internals or credentials in API responses.
+            notices.append("Itinerary was generated but not saved. Check Supabase configuration and server logs.")
     else:
         notices.append(
             "Supabase is not configured. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY to save trips."
