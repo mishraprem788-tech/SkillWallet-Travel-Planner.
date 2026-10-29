@@ -1,4 +1,4 @@
-````python
+
 import json
 import logging
 import re
@@ -208,4 +208,4 @@ Rules:
         )
 
     return itinerary
-````
+
