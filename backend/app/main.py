@@ -1,6 +1,7 @@
+import os
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-import os
 
 from app.config import get_settings
 from app.schemas import GenerateResponse, ServiceStatus, TripRequest
@@ -10,17 +11,24 @@ from app.services.demo import build_demo_itinerary
 
 app = FastAPI(title="SkillWallet Travel Itinerary Planner", version="1.0.0")
 
+
 def _cors_origins() -> list[str]:
+    # Always allow the deployed frontend; append any extra origins configured in Render.
+    origins = {
+        "https://cozy-gumption-591fe7.netlify.app",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    }
     configured = os.getenv("CORS_ORIGINS", "")
-    defaults = ["http://localhost:5173", "http://127.0.0.1:5173"]
-    return [origin.strip().rstrip("/") for origin in configured.split(",") if origin.strip()] or defaults
+    origins.update(origin.strip().rstrip("/") for origin in configured.split(",") if origin.strip())
+    return sorted(origins)
 
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins(),
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
 
@@ -51,9 +59,7 @@ def create_itinerary(trip: TripRequest) -> GenerateResponse:
     else:
         itinerary = build_demo_itinerary(trip)
         source = "demo"
-        notices.append(
-            "DEMO FALLBACK: GEMINI_API_KEY is missing. This itinerary is sample data, not live AI."
-        )
+        notices.append("DEMO FALLBACK: GEMINI_API_KEY is missing. This itinerary is sample data, not live AI.")
 
     saved = False
     itinerary_id = None
@@ -64,12 +70,9 @@ def create_itinerary(trip: TripRequest) -> GenerateResponse:
             if not saved:
                 notices.append("Supabase insert returned no row. Check the itineraries table.")
         except Exception:  # noqa: BLE001
-            # Avoid returning database internals or credentials in API responses.
             notices.append("Itinerary was generated but not saved. Check Supabase configuration and server logs.")
     else:
-        notices.append(
-            "Supabase is not configured. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY to save trips."
-        )
+        notices.append("Supabase is not configured. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY to save trips.")
 
     return GenerateResponse(
         source=source,
